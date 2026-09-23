@@ -37,7 +37,7 @@ DB_CONFIG = {
     'port':     int(os.environ.get('MYSQLPORT', 3306)),
     'database': os.environ.get('MYSQLDATABASE', 'expense_tracker'),
     'user':     os.environ.get('MYSQLUSER',     'root'),
-    'password': os.environ.get('MYSQLPASSWORD', 'ayush'),  # set your local password here
+    'password': os.environ.get('MYSQLPASSWORD', ''),  # set your local password here
 }
 
 
@@ -115,6 +115,9 @@ def create_tables_if_not_exist():
             connection.close()
         except Error as e:
             print(f"Table creation error: {e}")
+
+# Ensure tables exist at startup (for Gunicorn/production as well as local)
+create_tables_if_not_exist()
 
 
 # ── Chart helpers ─────────────────────────────────────────────
