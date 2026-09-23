@@ -1,4 +1,6 @@
 flask
+flask-login
+werkzeug
 mysql-connector-python
 matplotlib
 seaborn

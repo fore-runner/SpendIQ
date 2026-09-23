@@ -1,12 +1,18 @@
 import os
 os.environ['MPLBACKEND'] = 'Agg'
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask_login import (
+    LoginManager, UserMixin, login_user, logout_user,
+    login_required, current_user
+)
+from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
 from mysql.connector import Error
 from datetime import datetime, timedelta
 import io
 import base64
+import secrets
 
 import matplotlib
 matplotlib.use('Agg')
@@ -17,10 +23,15 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+
+# ── Flask-Login setup ─────────────────────────────────────────
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access SpendIQ.'
 
 # ── Database config ──────────────────────────────────────────
-# Reads from environment variables (required for Railway deployment).
-# For local dev, set a .env file or just hardcode below temporarily.
 DB_CONFIG = {
     'host':     os.environ.get('MYSQLHOST',     'localhost'),
     'port':     int(os.environ.get('MYSQLPORT', 3306)),
@@ -28,6 +39,34 @@ DB_CONFIG = {
     'user':     os.environ.get('MYSQLUSER',     'root'),
     'password': os.environ.get('MYSQLPASSWORD', 'ayush'),  # set your local password here
 }
+
+
+# ── User model ───────────────────────────────────────────────
+
+class User(UserMixin):
+    def __init__(self, id, username, email):
+        self.id       = id
+        self.username = username
+        self.email    = email
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    connection = get_db_connection()
+    if not connection:
+        return None
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        if row:
+            return User(row['id'], row['username'], row['email'])
+        return None
+    except Error:
+        return None
+
 
 # ── Database helpers ─────────────────────────────────────────
 
@@ -40,21 +79,37 @@ def get_db_connection():
         return None
 
 
-def create_table_if_not_exists():
+def create_tables_if_not_exist():
     connection = get_db_connection()
     if connection:
         try:
             cursor = connection.cursor()
+
+            # Users table
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS expenses (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    amount DECIMAL(10, 2) NOT NULL,
-                    category VARCHAR(50) NOT NULL,
-                    description VARCHAR(255),
-                    date DATE NOT NULL,
+                CREATE TABLE IF NOT EXISTS users (
+                    id         INT AUTO_INCREMENT PRIMARY KEY,
+                    username   VARCHAR(50)  UNIQUE NOT NULL,
+                    email      VARCHAR(120) UNIQUE NOT NULL,
+                    password   VARCHAR(255) NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Expenses table — with user_id foreign key
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS expenses (
+                    id          INT AUTO_INCREMENT PRIMARY KEY,
+                    user_id     INT NOT NULL,
+                    amount      DECIMAL(10, 2) NOT NULL,
+                    category    VARCHAR(50)    NOT NULL,
+                    description VARCHAR(255),
+                    date        DATE NOT NULL,
+                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            """)
+
             connection.commit()
             cursor.close()
             connection.close()
@@ -144,7 +199,7 @@ def make_monthly_chart(categories, amounts):
 
 # ── ML prediction ─────────────────────────────────────────────
 
-def predict_next_week(connection):
+def predict_next_week(connection, user_id):
     try:
         cursor = connection.cursor()
         end_date   = datetime.now().date()
@@ -152,10 +207,10 @@ def predict_next_week(connection):
         cursor.execute("""
             SELECT DATE(date) as d, SUM(amount) as total
             FROM expenses
-            WHERE date BETWEEN %s AND %s
+            WHERE date BETWEEN %s AND %s AND user_id = %s
             GROUP BY DATE(date)
             ORDER BY d
-        """, (start_date, end_date))
+        """, (start_date, end_date, user_id))
         rows = cursor.fetchall()
         cursor.close()
 
@@ -177,14 +232,139 @@ def predict_next_week(connection):
         return None
 
 
-# ── Flask routes ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
+# Auth routes
+# ──────────────────────────────────────────────────────────────
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
+
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        email    = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        confirm  = request.form.get('confirm_password', '')
+
+        # Basic validation
+        if not username or not email or not password:
+            flash('All fields are required.', 'error')
+            return render_template('register.html')
+        if len(username) < 3:
+            flash('Username must be at least 3 characters.', 'error')
+            return render_template('register.html')
+        if len(password) < 6:
+            flash('Password must be at least 6 characters.', 'error')
+            return render_template('register.html')
+        if password != confirm:
+            flash('Passwords do not match.', 'error')
+            return render_template('register.html')
+
+        connection = get_db_connection()
+        if not connection:
+            flash('Database error. Please try again.', 'error')
+            return render_template('register.html')
+
+        try:
+            cursor = connection.cursor(dictionary=True)
+
+            # Check if username or email already taken
+            cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s",
+                           (username, email))
+            existing = cursor.fetchone()
+            if existing:
+                flash('Username or email already in use.', 'error')
+                cursor.close()
+                connection.close()
+                return render_template('register.html')
+
+            hashed_password = generate_password_hash(password)
+            cursor.execute(
+                "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
+                (username, email, hashed_password)
+            )
+            connection.commit()
+            new_id = cursor.lastrowid
+            cursor.close()
+            connection.close()
+
+            user = User(new_id, username, email)
+            login_user(user)
+            flash(f'Welcome to SpendIQ, {username}! 🎉', 'success')
+            return redirect(url_for('home'))
+
+        except Error as e:
+            flash('Registration failed. Please try again.', 'error')
+            print(f"Register error: {e}")
+            return render_template('register.html')
+
+    return render_template('register.html')
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
+
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        remember = bool(request.form.get('remember'))
+
+        if not username or not password:
+            flash('Please enter username and password.', 'error')
+            return render_template('login.html')
+
+        connection = get_db_connection()
+        if not connection:
+            flash('Database error. Please try again.', 'error')
+            return render_template('login.html')
+
+        try:
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+            row = cursor.fetchone()
+            cursor.close()
+            connection.close()
+
+            if row and check_password_hash(row['password'], password):
+                user = User(row['id'], row['username'], row['email'])
+                login_user(user, remember=remember)
+                next_page = request.args.get('next')
+                return redirect(next_page or url_for('home'))
+            else:
+                flash('Invalid username or password.', 'error')
+                return render_template('login.html')
+
+        except Error as e:
+            flash('Login failed. Please try again.', 'error')
+            print(f"Login error: {e}")
+            return render_template('login.html')
+
+    return render_template('login.html')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('You have been logged out.', 'info')
+    return redirect(url_for('login'))
+
+
+# ──────────────────────────────────────────────────────────────
+# Main app routes (all require login)
+# ──────────────────────────────────────────────────────────────
 
 @app.route('/')
+@login_required
 def home():
-    return render_template('index.html')
+    return render_template('index.html', username=current_user.username)
 
 
 @app.route('/add_expense', methods=['POST'])
+@login_required
 def add_expense():
     try:
         data = request.get_json()
@@ -193,8 +373,8 @@ def add_expense():
             return jsonify({'success': False, 'message': 'Database connection failed'})
         cursor = connection.cursor()
         cursor.execute(
-            "INSERT INTO expenses (amount, category, description, date) VALUES (%s, %s, %s, %s)",
-            (data['amount'], data['category'], data['description'], data['date'])
+            "INSERT INTO expenses (user_id, amount, category, description, date) VALUES (%s, %s, %s, %s, %s)",
+            (current_user.id, data['amount'], data['category'], data['description'], data['date'])
         )
         connection.commit()
         cursor.close()
@@ -205,13 +385,15 @@ def add_expense():
 
 
 @app.route('/get_expenses')
+@login_required
 def get_expenses():
     try:
         connection = get_db_connection()
         if not connection:
             return jsonify([])
         cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
+        cursor.execute("SELECT * FROM expenses WHERE user_id = %s ORDER BY date DESC",
+                       (current_user.id,))
         expenses = cursor.fetchall()
         for expense in expenses:
             expense['date']       = expense['date'].strftime('%Y-%m-%d')
@@ -224,13 +406,16 @@ def get_expenses():
 
 
 @app.route('/delete_expense/<int:expense_id>', methods=['DELETE'])
+@login_required
 def delete_expense(expense_id):
     try:
         connection = get_db_connection()
         if not connection:
             return jsonify({'success': False, 'message': 'Database connection failed'})
         cursor = connection.cursor()
-        cursor.execute("DELETE FROM expenses WHERE id = %s", (expense_id,))
+        # Only delete if it belongs to the current user
+        cursor.execute("DELETE FROM expenses WHERE id = %s AND user_id = %s",
+                       (expense_id, current_user.id))
         connection.commit()
         cursor.close()
         connection.close()
@@ -240,6 +425,7 @@ def delete_expense(expense_id):
 
 
 @app.route('/get_weekly_chart')
+@login_required
 def get_weekly_chart():
     try:
         connection = get_db_connection()
@@ -251,10 +437,10 @@ def get_weekly_chart():
         cursor.execute("""
             SELECT DATE(date) as expense_date, SUM(amount) as daily_total
             FROM expenses
-            WHERE date BETWEEN %s AND %s
+            WHERE date BETWEEN %s AND %s AND user_id = %s
             GROUP BY DATE(date)
             ORDER BY expense_date
-        """, (start_date, end_date))
+        """, (start_date, end_date, current_user.id))
         results = cursor.fetchall()
         cursor.close()
 
@@ -273,6 +459,7 @@ def get_weekly_chart():
 
 
 @app.route('/get_monthly_chart')
+@login_required
 def get_monthly_chart():
     try:
         connection = get_db_connection()
@@ -283,10 +470,10 @@ def get_monthly_chart():
         cursor.execute("""
             SELECT category, SUM(amount) as category_total
             FROM expenses
-            WHERE date >= %s
+            WHERE date >= %s AND user_id = %s
             GROUP BY category
             ORDER BY category_total DESC
-        """, (current_month_start,))
+        """, (current_month_start, current_user.id))
         results = cursor.fetchall()
         cursor.close()
         connection.close()
@@ -298,12 +485,13 @@ def get_monthly_chart():
 
 
 @app.route('/get_prediction')
+@login_required
 def get_prediction():
     try:
         connection = get_db_connection()
         if not connection:
             return jsonify({'prediction': None, 'message': 'Database connection failed'})
-        prediction = predict_next_week(connection)
+        prediction = predict_next_week(connection, current_user.id)
         connection.close()
         if prediction is None:
             return jsonify({'prediction': None,
@@ -315,6 +503,7 @@ def get_prediction():
 
 
 @app.route('/get_stats')
+@login_required
 def get_stats():
     try:
         connection = get_db_connection()
@@ -324,17 +513,19 @@ def get_stats():
         now         = datetime.now()
         month_start = now.replace(day=1).date()
 
-        cursor.execute("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date >= %s", (month_start,))
+        cursor.execute("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date >= %s AND user_id = %s",
+                       (month_start, current_user.id))
         total_month = float(cursor.fetchone()[0])
 
-        cursor.execute("SELECT COUNT(*) FROM expenses WHERE date >= %s", (month_start,))
+        cursor.execute("SELECT COUNT(*) FROM expenses WHERE date >= %s AND user_id = %s",
+                       (month_start, current_user.id))
         count_month = cursor.fetchone()[0]
 
         cursor.execute("""
             SELECT category, SUM(amount) as total
-            FROM expenses WHERE date >= %s
+            FROM expenses WHERE date >= %s AND user_id = %s
             GROUP BY category ORDER BY total DESC LIMIT 1
-        """, (month_start,))
+        """, (month_start, current_user.id))
         top_row      = cursor.fetchone()
         top_category = top_row[0] if top_row else '-'
         avg_daily    = total_month / now.day if now.day > 0 else 0
@@ -352,5 +543,5 @@ def get_stats():
 
 
 if __name__ == '__main__':
-    create_table_if_not_exists()
+    create_tables_if_not_exist()
     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False, threaded=True)

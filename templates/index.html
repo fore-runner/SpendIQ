@@ -10,7 +10,7 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #050d1f;
+            background: #000000;
             min-height: 100vh;
             color: white;
             padding: 24px 16px;
@@ -61,6 +61,30 @@
             transition: all .2s;
         }
         .btn-icon:hover { background: rgba(255,215,0,0.2); border-color: #ffd700; color: #ffd700; }
+        .btn-logout {
+            background: rgba(255,80,80,0.12);
+            border: 1px solid rgba(255,80,80,0.3);
+            color: #ff9090;
+            border-radius: 10px;
+            padding: 8px 14px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all .2s;
+            text-decoration: none;
+        }
+        .btn-logout:hover { background: rgba(255,80,80,0.25); border-color: #ff5555; color: #ff5555; }
+        .user-greeting {
+            font-size: 0.82em;
+            color: rgba(255,255,255,0.5);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+        }
 
         /* ── Stats Row ── */
         .stats-row {
@@ -388,12 +412,16 @@
         <h1><i class="fas fa-brain"></i> SpendIQ</h1>
         <p>Smart spending insights powered by Matplotlib · Seaborn · Scikit-learn</p>
         <div class="header-actions">
+            <span class="user-greeting"><i class="fas fa-user-circle"></i> {{ username }}</span>
             <button class="btn-icon" onclick="exportCSV()">
                 <i class="fas fa-download"></i> Export CSV
             </button>
             <button class="btn-icon" onclick="refreshAll()">
                 <i class="fas fa-sync-alt"></i> Refresh
             </button>
+            <a href="/logout" class="btn-logout">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
         </div>
     </div>
 
