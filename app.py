@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import io
 import base64
 import secrets
+from urllib.parse import urlparse
 
 import matplotlib
 matplotlib.use('Agg')
@@ -31,55 +32,67 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Please log in to access SpendIQ.'
 
-# ── Database config ──────────────────────────────────────────
-DB_CONFIG = {
-    'host':     os.environ.get('MYSQLHOST',     'localhost'),
-    'port':     int(os.environ.get('MYSQLPORT', 3306)),
-    'database': os.environ.get('MYSQLDATABASE', 'expense_tracker'),
-    'user':     os.environ.get('MYSQLUSER',     'root'),
-    'password': os.environ.get('MYSQLPASSWORD', ''),  # set your local password here
-}
 
+# ── Database config & connection ──────────────────────────────
 
-# ── User model ───────────────────────────────────────────────
+def get_db_config():
+    # 1. Check for connection URLs provided by Railway or cloud MySQL
+    db_url = os.environ.get('MYSQL_URL') or os.environ.get('MYSQL_PRIVATE_URL') or os.environ.get('DATABASE_URL')
+    if db_url:
+        try:
+            parsed = urlparse(db_url)
+            return {
+                'host':     parsed.hostname,
+                'port':     int(parsed.port or 3306),
+                'database': parsed.path.lstrip('/') or 'railway',
+                'user':     parsed.username or 'root',
+                'password': parsed.password or '',
+            }
+        except Exception as e:
+            print(f"Error parsing database URL: {e}")
 
-class User(UserMixin):
-    def __init__(self, id, username, email):
-        self.id       = id
-        self.username = username
-        self.email    = email
+    # 2. Check individual environment variables (supports all Railway naming variants)
+    host = os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST', 'localhost')
+    port = int(os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT', 3306))
+    database = (
+        os.environ.get('MYSQLDATABASE') or
+        os.environ.get('MYSQL_DATABASE') or
+        'expense_tracker'
+    )
+    user = os.environ.get('MYSQLUSER') or os.environ.get('MYSQL_USER', 'root')
+    password = (
+        os.environ.get('MYSQLPASSWORD') or
+        os.environ.get('MYSQL_PASSWORD') or
+        os.environ.get('MYSQL_ROOT_PASSWORD', 'ayush')
+    )
 
+    return {
+        'host':     host,
+        'port':     port,
+        'database': database,
+        'user':     user,
+        'password': password
+    }
 
-@login_manager.user_loader
-def load_user(user_id):
-    connection = get_db_connection()
-    if not connection:
-        return None
-    try:
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
-        row = cursor.fetchone()
-        cursor.close()
-        connection.close()
-        if row:
-            return User(row['id'], row['username'], row['email'])
-        return None
-    except Error:
-        return None
-
-
-# ── Database helpers ─────────────────────────────────────────
 
 def get_db_connection():
+    config = get_db_config()
     try:
-        connection = mysql.connector.connect(**DB_CONFIG)
+        connection = mysql.connector.connect(**config)
         return connection
     except Error as e:
-        print(f"Database connection error: {e}")
+        print(f"Database connection error to {config.get('host')}:{config.get('port')}/{config.get('database')}: {e}")
         return None
 
 
-def create_tables_if_not_exist():
+# ── Self-healing table creation ───────────────────────────────
+
+_tables_initialized = False
+
+def ensure_tables_exist():
+    global _tables_initialized
+    if _tables_initialized:
+        return
     connection = get_db_connection()
     if connection:
         try:
@@ -113,11 +126,42 @@ def create_tables_if_not_exist():
             connection.commit()
             cursor.close()
             connection.close()
+            _tables_initialized = True
+            print("Database tables verified successfully.")
         except Error as e:
-            print(f"Table creation error: {e}")
+            print(f"Table initialization error: {e}")
 
-# Ensure tables exist at startup (for Gunicorn/production as well as local)
-create_tables_if_not_exist()
+
+@app.before_request
+def before_request_hook():
+    ensure_tables_exist()
+
+
+# ── User model ───────────────────────────────────────────────
+
+class User(UserMixin):
+    def __init__(self, id, username, email):
+        self.id       = id
+        self.username = username
+        self.email    = email
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    connection = get_db_connection()
+    if not connection:
+        return None
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        if row:
+            return User(row['id'], row['username'], row['email'])
+        return None
+    except Error:
+        return None
 
 
 # ── Chart helpers ─────────────────────────────────────────────
@@ -266,7 +310,7 @@ def register():
 
         connection = get_db_connection()
         if not connection:
-            flash('Database error. Please try again.', 'error')
+            flash('Database connection failed. Please check server settings.', 'error')
             return render_template('register.html')
 
         try:
@@ -298,7 +342,7 @@ def register():
             return redirect(url_for('home'))
 
         except Error as e:
-            flash('Registration failed. Please try again.', 'error')
+            flash(f'Registration error: {e}', 'error')
             print(f"Register error: {e}")
             return render_template('register.html')
 
@@ -321,7 +365,7 @@ def login():
 
         connection = get_db_connection()
         if not connection:
-            flash('Database error. Please try again.', 'error')
+            flash('Database connection failed. Please check server settings.', 'error')
             return render_template('login.html')
 
         try:
@@ -341,7 +385,7 @@ def login():
                 return render_template('login.html')
 
         except Error as e:
-            flash('Login failed. Please try again.', 'error')
+            flash(f'Login error: {e}', 'error')
             print(f"Login error: {e}")
             return render_template('login.html')
 
@@ -546,5 +590,5 @@ def get_stats():
 
 
 if __name__ == '__main__':
-    create_tables_if_not_exist()
+    ensure_tables_exist()
     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False, threaded=True)
