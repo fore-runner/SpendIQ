@@ -6,7 +6,6 @@
     <title>SpendIQ</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        /* ── Reset & Base ── */
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
@@ -28,6 +27,7 @@
             border-radius: 18px;
             padding: 28px 20px 20px;
             margin-bottom: 28px;
+            position: relative;
         }
         .header h1 {
             font-size: 2.4em;
@@ -38,6 +38,29 @@
             -webkit-text-fill-color: transparent;
         }
         .header p { color: rgba(255,255,255,0.65); margin-top: 6px; font-size: 0.95em; }
+        .header-actions {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            gap: 10px;
+        }
+        .btn-icon {
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.25);
+            color: white;
+            border-radius: 10px;
+            padding: 8px 14px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all .2s;
+        }
+        .btn-icon:hover { background: rgba(255,215,0,0.2); border-color: #ffd700; color: #ffd700; }
 
         /* ── Stats Row ── */
         .stats-row {
@@ -218,6 +241,46 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* ── Filter bar ── */
+        .filter-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .filter-bar select,
+        .filter-bar input[type="month"] {
+            padding: 8px 12px;
+            border: 1px solid rgba(255,255,255,0.22);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.12);
+            color: white;
+            font-size: 0.88em;
+            outline: none;
+            cursor: pointer;
+            transition: border-color .2s;
+        }
+        .filter-bar select:focus,
+        .filter-bar input[type="month"]:focus { border-color: #ffd700; }
+        .filter-bar select option { background: #1e3c72; }
+        .filter-bar .filter-label {
+            font-size: 0.82em;
+            color: rgba(255,255,255,0.6);
+            white-space: nowrap;
+        }
+        .filter-clear {
+            background: none;
+            border: 1px solid rgba(255,255,255,0.2);
+            color: rgba(255,255,255,0.6);
+            border-radius: 8px;
+            padding: 7px 12px;
+            font-size: 0.82em;
+            cursor: pointer;
+            transition: all .2s;
+        }
+        .filter-clear:hover { border-color: #ffd700; color: #ffd700; }
+
         /* ── Expenses table ── */
         .expenses-section {
             background: rgba(255,255,255,0.10);
@@ -226,10 +289,17 @@
             border-radius: 20px;
             padding: 26px;
         }
-        .expenses-section h3 {
+        .expenses-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 18px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .expenses-header h3 {
             color: #ffd700;
             font-size: 1.05em;
-            margin-bottom: 18px;
             display: flex;
             align-items: center;
             gap: 9px;
@@ -252,6 +322,40 @@
             font-size: 0.82em;
         }
         .empty-row { text-align: center; color: rgba(255,255,255,0.4); padding: 28px; }
+        .result-count {
+            font-size: 0.8em;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 10px;
+        }
+
+        /* ── Delete Confirmation Modal ── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #0d1f3c;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 18px;
+            padding: 32px 28px;
+            max-width: 380px;
+            width: 90%;
+            text-align: center;
+        }
+        .modal-icon { font-size: 2.5em; margin-bottom: 14px; }
+        .modal h3 { font-size: 1.2em; margin-bottom: 10px; }
+        .modal p { color: rgba(255,255,255,0.65); font-size: 0.9em; margin-bottom: 24px; }
+        .modal-btns { display: flex; gap: 12px; justify-content: center; }
+        .modal-btns .btn { flex: none; padding: 10px 28px; min-width: 110px; }
+        .btn-confirm-delete { background: linear-gradient(135deg, #ff6b6b, #ee5a52); color: white; }
+        .btn-cancel-modal { background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.3); }
 
         /* ── Scrollbar ── */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -262,10 +366,17 @@
         @media (max-width: 900px) {
             .main-grid { grid-template-columns: 1fr; }
             .stats-row { grid-template-columns: repeat(2, 1fr); }
+            .header-actions { position: static; transform: none; margin-top: 14px; justify-content: center; }
+            .header { padding-bottom: 18px; }
         }
         @media (max-width: 520px) {
             .stats-row { grid-template-columns: 1fr 1fr; }
             .header h1 { font-size: 1.7em; }
+            .filter-bar { flex-direction: column; align-items: stretch; }
+            .filter-bar select,
+            .filter-bar input[type="month"] { width: 100%; }
+            .modal-btns { flex-direction: column; }
+            .modal-btns .btn { width: 100%; }
         }
     </style>
 </head>
@@ -276,6 +387,14 @@
     <div class="header">
         <h1><i class="fas fa-brain"></i> SpendIQ</h1>
         <p>Smart spending insights powered by Matplotlib · Seaborn · Scikit-learn</p>
+        <div class="header-actions">
+            <button class="btn-icon" onclick="exportCSV()">
+                <i class="fas fa-download"></i> Export CSV
+            </button>
+            <button class="btn-icon" onclick="refreshAll()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
     </div>
 
     <!-- ── Quick Stats ── -->
@@ -381,7 +500,32 @@
 
     <!-- ── Expenses Table ── -->
     <div class="expenses-section">
-        <h3><i class="fas fa-list-ul"></i> Recent Expenses</h3>
+        <div class="expenses-header">
+            <h3><i class="fas fa-list-ul"></i> Recent Expenses</h3>
+        </div>
+
+        <!-- Filter bar -->
+        <div class="filter-bar">
+            <span class="filter-label"><i class="fas fa-filter"></i> Filter:</span>
+            <select id="filterCategory" onchange="applyFilters()">
+                <option value="">All Categories</option>
+                <option value="Food">🍽️ Food</option>
+                <option value="Travel">✈️ Travel</option>
+                <option value="Shopping">🛒 Shopping</option>
+                <option value="Education">📚 Education</option>
+                <option value="Entertainment">🎬 Entertainment</option>
+                <option value="Healthcare">⚕️ Healthcare</option>
+                <option value="Utilities">💡 Utilities</option>
+                <option value="Others">📦 Others</option>
+            </select>
+            <input type="month" id="filterMonth" onchange="applyFilters()" title="Filter by month">
+            <button class="filter-clear" onclick="clearFilters()">
+                <i class="fas fa-times"></i> Clear
+            </button>
+        </div>
+
+        <div class="result-count" id="resultCount"></div>
+
         <div class="table-wrap">
             <table>
                 <thead>
@@ -402,8 +546,29 @@
 
 </div><!-- /container -->
 
+<!-- ── Delete Confirmation Modal ── -->
+<div class="modal-overlay" id="deleteModal">
+    <div class="modal">
+        <div class="modal-icon">🗑️</div>
+        <h3>Delete Expense?</h3>
+        <p>This action cannot be undone. The expense will be permanently removed.</p>
+        <div class="modal-btns">
+            <button class="btn btn-confirm-delete" id="confirmDeleteBtn">
+                <i class="fas fa-trash-alt"></i> Delete
+            </button>
+            <button class="btn btn-cancel-modal" onclick="closeModal()">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
-// ── Helpers ──────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────
+let allExpenses = [];
+let pendingDeleteId = null;
+
+// ── Helpers ───────────────────────────────────────────────
 function fmt(amount) {
     return '₹' + parseFloat(amount).toFixed(2);
 }
@@ -429,7 +594,7 @@ function setTodayDate() {
     document.getElementById('date').value = `${y}-${m}-${d}`;
 }
 
-// ── Load charts (Matplotlib/Seaborn images from Flask) ──
+// ── Load charts ───────────────────────────────────────────
 async function loadWeeklyChart() {
     const wrap = document.getElementById('weeklyWrap');
     wrap.innerHTML = '<div class="spinner"></div>';
@@ -462,7 +627,7 @@ async function loadMonthlyChart() {
     }
 }
 
-// ── Load stats ──────────────────────────────────────────
+// ── Load stats ────────────────────────────────────────────
 async function loadStats() {
     try {
         const res = await fetch('/get_stats');
@@ -474,7 +639,7 @@ async function loadStats() {
     } catch { /* silently fail */ }
 }
 
-// ── Load ML prediction ──────────────────────────────────
+// ── Load ML prediction ────────────────────────────────────
 async function loadPrediction() {
     try {
         const res = await fetch('/get_prediction');
@@ -494,49 +659,88 @@ async function loadPrediction() {
     }
 }
 
-// ── Load expenses table ─────────────────────────────────
+// ── Load expenses table ───────────────────────────────────
 async function loadExpenses() {
     try {
         const res = await fetch('/get_expenses');
-        const expenses = await res.json();
-        const tbody = document.getElementById('expensesBody');
-
-        if (!expenses.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="empty-row">No expenses yet. Add your first one!</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = '';
-        expenses.forEach(exp => {
-            const tr = document.createElement('tr');
-            const dateStr = new Date(exp.date + 'T00:00:00').toLocaleDateString('en-IN', {
-                day: '2-digit', month: 'short', year: 'numeric'
-            });
-            tr.innerHTML = `
-                <td>${dateStr}</td>
-                <td style="color:#ffd700;font-weight:700;">${fmt(exp.amount)}</td>
-                <td><span class="category-tag">${exp.category}</span></td>
-                <td>${exp.description || '—'}</td>
-                <td>
-                    <button class="btn-danger" onclick="deleteExpense(${exp.id})">
-                        <i class="fas fa-trash-alt"></i>
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
+        allExpenses = await res.json();
+        applyFilters();
     } catch {
         document.getElementById('expensesBody').innerHTML =
             '<tr><td colspan="5" class="empty-row">Error loading expenses.</td></tr>';
     }
 }
 
-// ── Delete expense ──────────────────────────────────────
-async function deleteExpense(id) {
-    if (!confirm('Delete this expense?')) return;
+// ── Filter logic ──────────────────────────────────────────
+function applyFilters() {
+    const catFilter   = document.getElementById('filterCategory').value;
+    const monthFilter = document.getElementById('filterMonth').value; // "YYYY-MM"
+
+    let filtered = allExpenses.filter(exp => {
+        const catMatch   = !catFilter || exp.category === catFilter;
+        const monthMatch = !monthFilter || exp.date.startsWith(monthFilter);
+        return catMatch && monthMatch;
+    });
+
+    renderExpenses(filtered);
+}
+
+function clearFilters() {
+    document.getElementById('filterCategory').value = '';
+    document.getElementById('filterMonth').value = '';
+    renderExpenses(allExpenses);
+    document.getElementById('resultCount').textContent = '';
+}
+
+function renderExpenses(expenses) {
+    const tbody = document.getElementById('expensesBody');
+    const countEl = document.getElementById('resultCount');
+
+    if (!expenses.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-row">No expenses match your filters.</td></tr>';
+        countEl.textContent = 'Showing 0 entries';
+        return;
+    }
+
+    countEl.textContent = `Showing ${expenses.length} entr${expenses.length === 1 ? 'y' : 'ies'}`;
+    tbody.innerHTML = '';
+    expenses.forEach(exp => {
+        const tr = document.createElement('tr');
+        const dateStr = new Date(exp.date + 'T00:00:00').toLocaleDateString('en-IN', {
+            day: '2-digit', month: 'short', year: 'numeric'
+        });
+        tr.innerHTML = `
+            <td>${dateStr}</td>
+            <td style="color:#ffd700;font-weight:700;">${fmt(exp.amount)}</td>
+            <td><span class="category-tag">${exp.category}</span></td>
+            <td>${exp.description || '—'}</td>
+            <td>
+                <button class="btn-danger" onclick="confirmDelete(${exp.id})">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// ── Delete modal ──────────────────────────────────────────
+function confirmDelete(id) {
+    pendingDeleteId = id;
+    document.getElementById('deleteModal').classList.add('active');
+}
+
+function closeModal() {
+    pendingDeleteId = null;
+    document.getElementById('deleteModal').classList.remove('active');
+}
+
+document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
+    if (!pendingDeleteId) return;
     try {
-        const res = await fetch(`/delete_expense/${id}`, { method: 'DELETE' });
+        const res = await fetch(`/delete_expense/${pendingDeleteId}`, { method: 'DELETE' });
         const data = await res.json();
+        closeModal();
         if (data.success) {
             showStatus('Expense deleted!', 'success');
             refreshAll();
@@ -544,11 +748,40 @@ async function deleteExpense(id) {
             showStatus('Error: ' + data.message, 'error');
         }
     } catch (e) {
+        closeModal();
         showStatus('Error: ' + e.message, 'error');
     }
+});
+
+// Close modal on overlay click
+document.getElementById('deleteModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+
+// ── CSV Export ────────────────────────────────────────────
+function exportCSV() {
+    if (!allExpenses.length) {
+        alert('No expenses to export yet.');
+        return;
+    }
+    const headers = ['Date', 'Amount (INR)', 'Category', 'Description'];
+    const rows = allExpenses.map(e => [
+        e.date,
+        parseFloat(e.amount).toFixed(2),
+        e.category,
+        `"${(e.description || '').replace(/"/g, '""')}"`
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `spendiq_export_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
-// ── Form submit ─────────────────────────────────────────
+// ── Form submit ───────────────────────────────────────────
 document.getElementById('expenseForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     const payload = {
@@ -576,7 +809,7 @@ document.getElementById('expenseForm').addEventListener('submit', async function
     }
 });
 
-// ── Refresh everything ──────────────────────────────────
+// ── Refresh everything ────────────────────────────────────
 function refreshAll() {
     loadExpenses();
     loadWeeklyChart();
@@ -585,7 +818,7 @@ function refreshAll() {
     loadPrediction();
 }
 
-// ── Init ────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
     setTodayDate();
     refreshAll();

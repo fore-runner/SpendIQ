@@ -1,5 +1,6 @@
 import os
 os.environ['MPLBACKEND'] = 'Agg'
+
 from flask import Flask, render_template, request, jsonify
 import mysql.connector
 from mysql.connector import Error
@@ -17,12 +18,18 @@ from sklearn.linear_model import LinearRegression
 
 app = Flask(__name__)
 
+# ── Database config ──────────────────────────────────────────
+# Reads from environment variables (required for Railway deployment).
+# For local dev, set a .env file or just hardcode below temporarily.
 DB_CONFIG = {
-    'host': 'localhost',
-    'database': 'expense_tracker',
-    'user': 'root',
-    'password': 'ayush'  # PUT YOUR MYSQL PASSWORD HERE
+    'host':     os.environ.get('MYSQLHOST',     'localhost'),
+    'port':     int(os.environ.get('MYSQLPORT', 3306)),
+    'database': os.environ.get('MYSQLDATABASE', 'expense_tracker'),
+    'user':     os.environ.get('MYSQLUSER',     'root'),
+    'password': os.environ.get('MYSQLPASSWORD', 'ayush'),  # set your local password here
 }
+
+# ── Database helpers ─────────────────────────────────────────
 
 def get_db_connection():
     try:
@@ -31,6 +38,7 @@ def get_db_connection():
     except Error as e:
         print(f"Database connection error: {e}")
         return None
+
 
 def create_table_if_not_exists():
     connection = get_db_connection()
@@ -53,6 +61,9 @@ def create_table_if_not_exists():
         except Error as e:
             print(f"Table creation error: {e}")
 
+
+# ── Chart helpers ─────────────────────────────────────────────
+
 def fig_to_base64(fig):
     buf = io.BytesIO()
     fig.savefig(buf, format='png', bbox_inches='tight',
@@ -61,6 +72,7 @@ def fig_to_base64(fig):
     img_b64 = base64.b64encode(buf.read()).decode('utf-8')
     plt.close(fig)
     return img_b64
+
 
 def make_weekly_chart(week_data):
     dates = list(week_data.keys())
@@ -77,7 +89,6 @@ def make_weekly_chart(week_data):
                  markersize=8, markerfacecolor='#ffd700', markeredgecolor='white',
                  markeredgewidth=1.5)
     ax.fill_between(x_labels, amounts, color='#ffd700', alpha=0.18)
-
     ax.set_facecolor('none')
     ax.tick_params(colors='white', labelsize=9)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'₹{v:.0f}'))
@@ -90,9 +101,9 @@ def make_weekly_chart(week_data):
     ax.grid(axis='y', color='white', alpha=0.1, linestyle='--')
     for label in ax.get_xticklabels() + ax.get_yticklabels():
         label.set_color('white')
-
     plt.tight_layout()
     return fig_to_base64(fig)
+
 
 def make_monthly_chart(categories, amounts):
     if not categories:
@@ -127,14 +138,16 @@ def make_monthly_chart(categories, amounts):
     ax.set_xlim(0, max(amounts) * 1.25)
     for label in ax.get_xticklabels() + ax.get_yticklabels():
         label.set_color('white')
-
     plt.tight_layout()
     return fig_to_base64(fig)
+
+
+# ── ML prediction ─────────────────────────────────────────────
 
 def predict_next_week(connection):
     try:
         cursor = connection.cursor()
-        end_date = datetime.now().date()
+        end_date   = datetime.now().date()
         start_date = end_date - timedelta(days=29)
         cursor.execute("""
             SELECT DATE(date) as d, SUM(amount) as total
@@ -156,18 +169,20 @@ def predict_next_week(connection):
 
         model = LinearRegression()
         model.fit(X, y)
-
         next_days = np.array([[i] for i in range(30, 37)])
-        predicted_daily = model.predict(next_days)
-        predicted_weekly = max(0.0, float(predicted_daily.sum()))
+        predicted_weekly = max(0.0, float(model.predict(next_days).sum()))
         return round(predicted_weekly, 2)
     except Exception as e:
         print(f"Prediction error: {e}")
         return None
 
+
+# ── Flask routes ──────────────────────────────────────────────
+
 @app.route('/')
 def home():
     return render_template('index.html')
+
 
 @app.route('/add_expense', methods=['POST'])
 def add_expense():
@@ -188,6 +203,7 @@ def add_expense():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
+
 @app.route('/get_expenses')
 def get_expenses():
     try:
@@ -198,13 +214,14 @@ def get_expenses():
         cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
         expenses = cursor.fetchall()
         for expense in expenses:
-            expense['date'] = expense['date'].strftime('%Y-%m-%d')
+            expense['date']       = expense['date'].strftime('%Y-%m-%d')
             expense['created_at'] = expense['created_at'].strftime('%Y-%m-%d %H:%M:%S')
         cursor.close()
         connection.close()
         return jsonify(expenses)
     except Exception as e:
         return jsonify({'error': str(e)})
+
 
 @app.route('/delete_expense/<int:expense_id>', methods=['DELETE'])
 def delete_expense(expense_id):
@@ -221,6 +238,7 @@ def delete_expense(expense_id):
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
+
 @app.route('/get_weekly_chart')
 def get_weekly_chart():
     try:
@@ -228,7 +246,7 @@ def get_weekly_chart():
         if not connection:
             return jsonify({'error': 'Database connection failed'})
         cursor = connection.cursor()
-        end_date = datetime.now().date()
+        end_date   = datetime.now().date()
         start_date = end_date - timedelta(days=6)
         cursor.execute("""
             SELECT DATE(date) as expense_date, SUM(amount) as daily_total
@@ -239,6 +257,7 @@ def get_weekly_chart():
         """, (start_date, end_date))
         results = cursor.fetchall()
         cursor.close()
+
         week_data = {}
         current = start_date
         for _ in range(7):
@@ -246,11 +265,12 @@ def get_weekly_chart():
             current += timedelta(days=1)
         for row in results:
             week_data[row[0].strftime('%Y-%m-%d')] = float(row[1])
+
         connection.close()
-        img_b64 = make_weekly_chart(week_data)
-        return jsonify({'image': img_b64})
+        return jsonify({'image': make_weekly_chart(week_data)})
     except Exception as e:
         return jsonify({'error': str(e)})
+
 
 @app.route('/get_monthly_chart')
 def get_monthly_chart():
@@ -271,11 +291,11 @@ def get_monthly_chart():
         cursor.close()
         connection.close()
         categories = [row[0] for row in results]
-        amounts = [float(row[1]) for row in results]
-        img_b64 = make_monthly_chart(categories, amounts)
-        return jsonify({'image': img_b64})
+        amounts    = [float(row[1]) for row in results]
+        return jsonify({'image': make_monthly_chart(categories, amounts)})
     except Exception as e:
         return jsonify({'error': str(e)})
+
 
 @app.route('/get_prediction')
 def get_prediction():
@@ -287,11 +307,12 @@ def get_prediction():
         connection.close()
         if prediction is None:
             return jsonify({'prediction': None,
-                            'message': 'Need more data (at least 5 days with expenses) to make a prediction.'})
+                            'message': 'Need at least 5 days of expense data to make a prediction.'})
         return jsonify({'prediction': prediction,
                         'message': f'Predicted spending next week: ₹{prediction:.2f}'})
     except Exception as e:
         return jsonify({'prediction': None, 'message': str(e)})
+
 
 @app.route('/get_stats')
 def get_stats():
@@ -300,31 +321,36 @@ def get_stats():
         if not connection:
             return jsonify({})
         cursor = connection.cursor()
-        now = datetime.now()
+        now         = datetime.now()
         month_start = now.replace(day=1).date()
+
         cursor.execute("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date >= %s", (month_start,))
         total_month = float(cursor.fetchone()[0])
+
         cursor.execute("SELECT COUNT(*) FROM expenses WHERE date >= %s", (month_start,))
         count_month = cursor.fetchone()[0]
+
         cursor.execute("""
             SELECT category, SUM(amount) as total
             FROM expenses WHERE date >= %s
             GROUP BY category ORDER BY total DESC LIMIT 1
         """, (month_start,))
-        top_row = cursor.fetchone()
+        top_row      = cursor.fetchone()
         top_category = top_row[0] if top_row else '-'
-        avg_daily = total_month / now.day if now.day > 0 else 0
+        avg_daily    = total_month / now.day if now.day > 0 else 0
+
         cursor.close()
         connection.close()
         return jsonify({
-            'total_month': round(total_month, 2),
-            'count_month': count_month,
+            'total_month':  round(total_month, 2),
+            'count_month':  count_month,
             'top_category': top_category,
-            'avg_daily': round(avg_daily, 2)
+            'avg_daily':    round(avg_daily, 2)
         })
     except Exception as e:
         return jsonify({'error': str(e)})
 
+
 if __name__ == '__main__':
     create_table_if_not_exists()
-    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False, threaded=True)
