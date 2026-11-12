@@ -7,8 +7,9 @@ from flask_login import (
     login_required, current_user
 )
 from werkzeug.security import generate_password_hash, check_password_hash
-import mysql.connector
-from mysql.connector import Error
+import psycopg2
+from psycopg2 import Error
+from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
 import io
 import base64
@@ -36,34 +37,44 @@ login_manager.login_message = 'Please log in to access SpendIQ.'
 # ── Database config & connection ──────────────────────────────
 
 def get_db_config():
-    # 1. Check for connection URLs provided by Railway or cloud MySQL
-    db_url = os.environ.get('MYSQL_URL') or os.environ.get('MYSQL_PRIVATE_URL') or os.environ.get('DATABASE_URL')
+    # 1. Check for connection URLs provided by Render, Railway, or cloud providers
+    db_url = os.environ.get('DATABASE_URL') or os.environ.get('PGURL') or \
+             os.environ.get('POSTGRES_URL') or os.environ.get('MYSQL_URL')
     if db_url:
         try:
             parsed = urlparse(db_url)
             return {
                 'host':     parsed.hostname,
-                'port':     int(parsed.port or 3306),
+                'port':     int(parsed.port or 5432),
                 'database': parsed.path.lstrip('/') or 'railway',
-                'user':     parsed.username or 'root',
+                'user':     parsed.username or 'postgres',
                 'password': parsed.password or '',
             }
         except Exception as e:
             print(f"Error parsing database URL: {e}")
 
-    # 2. Check individual environment variables (supports all Railway naming variants)
-    host = os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST', 'localhost')
-    port = int(os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT', 3306))
+    # 2. Check individual environment variables (Render Postgres + Railway MySQL variants)
+    host = (
+        os.environ.get('PGHOST') or os.environ.get('POSTGRES_HOST') or
+        os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST', 'localhost')
+    )
+    port = int(
+        os.environ.get('PGPORT') or os.environ.get('POSTGRES_PORT') or
+        os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT', 5432)
+    )
     database = (
-        os.environ.get('MYSQLDATABASE') or
-        os.environ.get('MYSQL_DATABASE') or
+        os.environ.get('PGDATABASE') or os.environ.get('POSTGRES_DB') or
+        os.environ.get('MYSQLDATABASE') or os.environ.get('MYSQL_DATABASE') or
         'expense_tracker'
     )
-    user = os.environ.get('MYSQLUSER') or os.environ.get('MYSQL_USER', 'root')
+    user = (
+        os.environ.get('PGUSER') or os.environ.get('POSTGRES_USER') or
+        os.environ.get('MYSQLUSER') or os.environ.get('MYSQL_USER', 'postgres')
+    )
     password = (
-        os.environ.get('MYSQLPASSWORD') or
-        os.environ.get('MYSQL_PASSWORD') or
-        os.environ.get('MYSQL_ROOT_PASSWORD', 'ayush')
+        os.environ.get('PGPASSWORD') or os.environ.get('POSTGRES_PASSWORD') or
+        os.environ.get('MYSQLPASSWORD') or os.environ.get('MYSQL_PASSWORD') or
+        os.environ.get('MYSQL_ROOT_PASSWORD', '')
     )
 
     return {
@@ -78,7 +89,7 @@ def get_db_config():
 def get_db_connection():
     config = get_db_config()
     try:
-        connection = mysql.connector.connect(**config)
+        connection = psycopg2.connect(**config)
         return connection
     except Error as e:
         print(f"Database connection error to {config.get('host')}:{config.get('port')}/{config.get('database')}: {e}")
@@ -101,24 +112,24 @@ def ensure_tables_exist():
             # Users table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    id         INT AUTO_INCREMENT PRIMARY KEY,
+                    id         SERIAL PRIMARY KEY,
                     username   VARCHAR(50)  UNIQUE NOT NULL,
                     email      VARCHAR(120) UNIQUE NOT NULL,
                     password   VARCHAR(255) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
             # Expenses table — with user_id foreign key
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS expenses (
-                    id          INT AUTO_INCREMENT PRIMARY KEY,
+                    id          SERIAL PRIMARY KEY,
                     user_id     INT NOT NULL,
                     amount      DECIMAL(10, 2) NOT NULL,
                     category    VARCHAR(50)    NOT NULL,
                     description VARCHAR(255),
                     date        DATE NOT NULL,
-                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 )
             """)
@@ -152,7 +163,7 @@ def load_user(user_id):
     if not connection:
         return None
     try:
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
         cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
         row = cursor.fetchone()
         cursor.close()
@@ -314,7 +325,7 @@ def register():
             return render_template('register.html')
 
         try:
-            cursor = connection.cursor(dictionary=True)
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
 
             # Check if username or email already taken
             cursor.execute("SELECT id FROM users WHERE username = %s OR email = %s",
@@ -369,7 +380,7 @@ def login():
             return render_template('login.html')
 
         try:
-            cursor = connection.cursor(dictionary=True)
+            cursor = connection.cursor(cursor_factory=RealDictCursor)
             cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
             row = cursor.fetchone()
             cursor.close()
