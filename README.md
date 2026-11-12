@@ -1,6 +1,6 @@
 # SpendIQ – Smart Personal Expense Tracker
 
-A full-stack personal finance web app built with Python, Flask, and MySQL. It helps track daily spending, visualize expenses with interactive charts, and estimate upcoming weekly expenses using machine learning.
+A full-stack personal finance web app built with Python, Flask, and PostgreSQL. It helps track daily spending, visualize expenses with interactive charts, and estimate upcoming weekly expenses using machine learning.
 
 **Try it out here:** [https://spendiq-production-3146.up.railway.app](https://spendiq-production-3146.up.railway.app)
 
@@ -22,7 +22,7 @@ A full-stack personal finance web app built with Python, Flask, and MySQL. It he
 ## Tech Stack
 
 - **Backend:** Python 3, Flask, Flask-Login, Werkzeug
-- **Database:** MySQL
+- **Database:** PostgreSQL
 - **Data Science & ML:** Pandas, NumPy, Scikit-learn, Matplotlib, Seaborn
 - **Frontend:** HTML5, CSS3, JavaScript (Fetch API, responsive layout)
 - **Deployment:** Railway
