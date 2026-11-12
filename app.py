@@ -449,17 +449,20 @@ def get_expenses():
         connection = get_db_connection()
         if not connection:
             return jsonify([])
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
         cursor.execute("SELECT * FROM expenses WHERE user_id = %s ORDER BY date DESC",
                        (current_user.id,))
         expenses = cursor.fetchall()
         for expense in expenses:
-            expense['date']       = expense['date'].strftime('%Y-%m-%d')
-            expense['created_at'] = expense['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+            if expense.get('date'):
+                expense['date'] = expense['date'].strftime('%Y-%m-%d')
+            if expense.get('created_at'):
+                expense['created_at'] = expense['created_at'].strftime('%Y-%m-%d %H:%M:%S')
         cursor.close()
         connection.close()
         return jsonify(expenses)
     except Exception as e:
+        print(f"get_expenses error: {e}")
         return jsonify({'error': str(e)})
 
 
