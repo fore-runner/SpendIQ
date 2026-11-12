@@ -2,7 +2,7 @@
 
 A full-stack personal finance web app built with Python, Flask, and PostgreSQL. It helps track daily spending, visualize expenses with interactive charts, and estimate upcoming weekly expenses using machine learning.
 
-**Try it out here:** [https://spendiq-production-3146.up.railway.app](https://spendiq-production-3146.up.railway.app)
+**Try it out here:** https://spendiq-9hup.onrender.com/
 
 ---
 
