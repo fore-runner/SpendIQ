@@ -1,0 +1,40 @@
+# SpendIQ – Render deployment manifest
+# Deploys the Flask app (gunicorn) + a free MySQL database in one click.
+# https://render.com/docs/reference/blueprint-spec
+
+databases:
+  - name: spendiq-db
+    plan: free
+    ipAllowList: []
+
+services:
+  - type: web
+    name: spendiq
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: MYSQLHOST
+        fromDatabase:
+          name: spendiq-db
+          property: host
+      - key: MYSQLPORT
+        fromDatabase:
+          name: spendiq-db
+          property: port
+      - key: MYSQLDATABASE
+        fromDatabase:
+          name: spendiq-db
+          property: database
+      - key: MYSQLUSER
+        fromDatabase:
+          name: spendiq-db
+          property: username
+      - key: MYSQLPASSWORD
+        fromDatabase:
+          name: spendiq-db
+          property: password
+      - key: SECRET_KEY
+        generateValue: true
