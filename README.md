@@ -25,4 +25,4 @@ A full-stack personal finance web app built with Python, Flask, and PostgreSQL. 
 - **Database:** PostgreSQL
 - **Data Science & ML:** Pandas, NumPy, Scikit-learn, Matplotlib, Seaborn
 - **Frontend:** HTML5, CSS3, JavaScript (Fetch API, responsive layout)
-- **Deployment:** Railway
+- **Deployment:** Render
